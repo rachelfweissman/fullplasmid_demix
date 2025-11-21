@@ -1,0 +1,90 @@
+2025-11-20 23:10:04,620 - INFO - Options: keep_temp=False, threads=4, quick_method=True
+2025-11-20 23:10:04,620 - INFO - Starting main process.
+2025-11-20 23:10:04,621 - INFO - Reading sequence sets from Excel file: example/plasmid_uniqueseq.xlsx
+2025-11-20 23:10:04,655 - INFO - Indexing FASTQ file: example/raw_reads/8GKQNQ_1.fastq
+2025-11-20 23:10:04,918 - INFO - Indexing FASTQ file: example/raw_reads/8GKQNQ_2.fastq
+2025-11-20 23:10:05,284 - INFO - Processing plasmids from 8GKQNQ_1
+2025-11-20 23:10:05,284 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:05,343 - INFO - Found 329 matched reads.
+2025-11-20 23:10:05,343 - INFO - Writing FASTA file: example/out_temp/pYIH_001_1/pYIH_001_1_reads.fasta
+2025-11-20 23:10:05,358 - INFO - Quick mapping to reference for pYIH_001_1
+2025-11-20 23:10:05,358 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_001.fa example/out_temp/pYIH_001_1/pYIH_001_1_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_001_1/pYIH_001_1_sorted.bam
+2025-11-20 23:10:05,585 - INFO - Running command: samtools index example/out_temp/pYIH_001_1/pYIH_001_1_sorted.bam
+2025-11-20 23:10:05,602 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_001_1/pYIH_001_1_consensus.fa example/out_temp/pYIH_001_1/pYIH_001_1_sorted.bam
+2025-11-20 23:10:05,694 - INFO - Generating plots for pYIH_001_1.
+2025-11-20 23:10:05,695 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_001_1/pYIH_001_1_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpl_jguj1p
+2025-11-20 23:10:05,796 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_001_1/pYIH_001_1_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:05,875 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:05,911 - INFO - Found 121 matched reads.
+2025-11-20 23:10:05,911 - INFO - Writing FASTA file: example/out_temp/pYIH_002_1/pYIH_002_1_reads.fasta
+2025-11-20 23:10:05,914 - INFO - Quick mapping to reference for pYIH_002_1
+2025-11-20 23:10:05,914 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_002.fa example/out_temp/pYIH_002_1/pYIH_002_1_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_002_1/pYIH_002_1_sorted.bam
+2025-11-20 23:10:06,005 - INFO - Running command: samtools index example/out_temp/pYIH_002_1/pYIH_002_1_sorted.bam
+2025-11-20 23:10:06,019 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_002_1/pYIH_002_1_consensus.fa example/out_temp/pYIH_002_1/pYIH_002_1_sorted.bam
+2025-11-20 23:10:06,056 - INFO - Generating plots for pYIH_002_1.
+2025-11-20 23:10:06,056 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_002_1/pYIH_002_1_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmptvuxyytd
+2025-11-20 23:10:06,089 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_002_1/pYIH_002_1_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:06,133 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:06,158 - INFO - Found 410 matched reads.
+2025-11-20 23:10:06,159 - INFO - Writing FASTA file: example/out_temp/pYIH_003_1/pYIH_003_1_reads.fasta
+2025-11-20 23:10:06,167 - INFO - Quick mapping to reference for pYIH_003_1
+2025-11-20 23:10:06,167 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_003.fa example/out_temp/pYIH_003_1/pYIH_003_1_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_003_1/pYIH_003_1_sorted.bam
+2025-11-20 23:10:06,430 - INFO - Running command: samtools index example/out_temp/pYIH_003_1/pYIH_003_1_sorted.bam
+2025-11-20 23:10:06,446 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_003_1/pYIH_003_1_consensus.fa example/out_temp/pYIH_003_1/pYIH_003_1_sorted.bam
+2025-11-20 23:10:06,556 - INFO - Generating plots for pYIH_003_1.
+2025-11-20 23:10:06,557 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_003_1/pYIH_003_1_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpx8ka43li
+2025-11-20 23:10:06,592 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_003_1/pYIH_003_1_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:06,681 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:06,706 - INFO - Found 154 matched reads.
+2025-11-20 23:10:06,706 - INFO - Writing FASTA file: example/out_temp/pYIH_004_1/pYIH_004_1_reads.fasta
+2025-11-20 23:10:06,709 - INFO - Quick mapping to reference for pYIH_004_1
+2025-11-20 23:10:06,709 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_004.fa example/out_temp/pYIH_004_1/pYIH_004_1_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_004_1/pYIH_004_1_sorted.bam
+2025-11-20 23:10:06,820 - INFO - Running command: samtools index example/out_temp/pYIH_004_1/pYIH_004_1_sorted.bam
+2025-11-20 23:10:06,835 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_004_1/pYIH_004_1_consensus.fa example/out_temp/pYIH_004_1/pYIH_004_1_sorted.bam
+2025-11-20 23:10:06,881 - INFO - Generating plots for pYIH_004_1.
+2025-11-20 23:10:06,882 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_004_1/pYIH_004_1_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpu3b5dgmf
+2025-11-20 23:10:06,916 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_004_1/pYIH_004_1_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:06,970 - INFO - Processing plasmids from 8GKQNQ_2
+2025-11-20 23:10:06,971 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:07,033 - INFO - Found 150 matched reads.
+2025-11-20 23:10:07,034 - INFO - Writing FASTA file: example/out_temp/pYIH_001_2/pYIH_001_2_reads.fasta
+2025-11-20 23:10:07,037 - INFO - Quick mapping to reference for pYIH_001_2
+2025-11-20 23:10:07,037 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_001.fa example/out_temp/pYIH_001_2/pYIH_001_2_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_001_2/pYIH_001_2_sorted.bam
+2025-11-20 23:10:07,145 - INFO - Running command: samtools index example/out_temp/pYIH_001_2/pYIH_001_2_sorted.bam
+2025-11-20 23:10:07,159 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_001_2/pYIH_001_2_consensus.fa example/out_temp/pYIH_001_2/pYIH_001_2_sorted.bam
+2025-11-20 23:10:07,202 - INFO - Generating plots for pYIH_001_2.
+2025-11-20 23:10:07,202 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_001_2/pYIH_001_2_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpxkrh6tt3
+2025-11-20 23:10:07,234 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_001_2/pYIH_001_2_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:07,289 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:07,326 - INFO - Found 121 matched reads.
+2025-11-20 23:10:07,326 - INFO - Writing FASTA file: example/out_temp/pYIH_002_2/pYIH_002_2_reads.fasta
+2025-11-20 23:10:07,328 - INFO - Quick mapping to reference for pYIH_002_2
+2025-11-20 23:10:07,328 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_002.fa example/out_temp/pYIH_002_2/pYIH_002_2_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_002_2/pYIH_002_2_sorted.bam
+2025-11-20 23:10:07,420 - INFO - Running command: samtools index example/out_temp/pYIH_002_2/pYIH_002_2_sorted.bam
+2025-11-20 23:10:07,434 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_002_2/pYIH_002_2_consensus.fa example/out_temp/pYIH_002_2/pYIH_002_2_sorted.bam
+2025-11-20 23:10:07,472 - INFO - Generating plots for pYIH_002_2.
+2025-11-20 23:10:07,472 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_002_2/pYIH_002_2_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpqi93x868
+2025-11-20 23:10:07,503 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_002_2/pYIH_002_2_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:07,548 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:07,577 - INFO - Found 233 matched reads.
+2025-11-20 23:10:07,577 - INFO - Writing FASTA file: example/out_temp/pYIH_003_2/pYIH_003_2_reads.fasta
+2025-11-20 23:10:07,582 - INFO - Quick mapping to reference for pYIH_003_2
+2025-11-20 23:10:07,582 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_003.fa example/out_temp/pYIH_003_2/pYIH_003_2_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_003_2/pYIH_003_2_sorted.bam
+2025-11-20 23:10:07,751 - INFO - Running command: samtools index example/out_temp/pYIH_003_2/pYIH_003_2_sorted.bam
+2025-11-20 23:10:07,766 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_003_2/pYIH_003_2_consensus.fa example/out_temp/pYIH_003_2/pYIH_003_2_sorted.bam
+2025-11-20 23:10:07,829 - INFO - Generating plots for pYIH_003_2.
+2025-11-20 23:10:07,829 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_003_2/pYIH_003_2_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmpsola9_gw
+2025-11-20 23:10:07,862 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_003_2/pYIH_003_2_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:07,931 - INFO - Finding sequences matching unique identifiers.
+2025-11-20 23:10:07,961 - INFO - Found 108 matched reads.
+2025-11-20 23:10:07,961 - INFO - Writing FASTA file: example/out_temp/pYIH_004_2/pYIH_004_2_reads.fasta
+2025-11-20 23:10:07,964 - INFO - Quick mapping to reference for pYIH_004_2
+2025-11-20 23:10:07,964 - INFO - Running command: minimap2 -ax map-ont /Users/rachelweissman/Desktop/Github/fullplasmid_demix/example/reference_plasmids/pYIH_004.fa example/out_temp/pYIH_004_2/pYIH_004_2_reads.fasta 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o example/out_temp/pYIH_004_2/pYIH_004_2_sorted.bam
+2025-11-20 23:10:08,047 - INFO - Running command: samtools index example/out_temp/pYIH_004_2/pYIH_004_2_sorted.bam
+2025-11-20 23:10:08,062 - INFO - Running command: samtools consensus --config r10.4_sup --output example/out_temp/pYIH_004_2/pYIH_004_2_consensus.fa example/out_temp/pYIH_004_2/pYIH_004_2_sorted.bam
+2025-11-20 23:10:08,097 - INFO - Generating plots for pYIH_004_2.
+2025-11-20 23:10:08,097 - INFO - Running command: samtools depth -@ 4 -a example/out_temp/pYIH_004_2/pYIH_004_2_sorted.bam > /var/folders/nk/6k4q1dn11tz0snswxq2ws8n80000gn/T/tmp3c_rxrip
+2025-11-20 23:10:08,128 - INFO - Running command: samtools view -@ 4 example/out_temp/pYIH_004_2/pYIH_004_2_sorted.bam | awk '{print length($10)}' > read_lengths.txt
+2025-11-20 23:10:08,171 - INFO - Writing FASTQ file: example/out_temp/unused_reads/8GKQNQ_1_unused.fastq
+2025-11-20 23:10:08,774 - INFO - Writing FASTQ file: example/out_temp/unused_reads/8GKQNQ_2_unused.fastq
+2025-11-20 23:10:09,376 - INFO - Main process completed.

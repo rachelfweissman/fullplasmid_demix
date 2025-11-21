@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+*.manifest
+*.spec
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+env/
+conda-env/
+
+# Log files
+*.log
+logs/
+
+# Project specific output files
+output*/
+*_reads.fasta
+*_consensus.fa
+*_sorted.bam
+*_coverage.html
+*_readLengths.html
+*.paf
+read_lengths.txt
+*unused.fastq
+
+# Temporary directories created by the script
+*_flye/
+*_medaka/
+*_racon*/
+temp/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+example/out_temp/
+example/example_results/
+conda-recipe/
+setup.py
