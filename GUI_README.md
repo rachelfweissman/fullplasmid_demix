@@ -3,6 +3,31 @@
 A standalone desktop app that wraps `fullPlasmidSeq_demix_RFW.py` in a
 point-and-click interface so non-Python users can run the pipeline.
 
+## Installing on macOS (for end users)
+
+1. Download `PlasmidDemix.dmg` from the [latest release](https://github.com/rachelfweissman/fullplasmid_demix/releases/latest).
+2. Open the `.dmg` and drag **PlasmidDemix** into your `Applications` folder.
+3. **Important — one-time fix for the "damaged" warning:** because the app is not codesigned with an Apple Developer ID, macOS marks any downloaded copy as quarantined and (on Apple Silicon) refuses to open it with a misleading *"PlasmidDemix is damaged and can't be opened"* message. This is a false alarm. Open **Terminal** once and run:
+   ```bash
+   xattr -cr /Applications/PlasmidDemix.app
+   ```
+   Then double-click the app normally. You only have to do this once per machine.
+4. First launch takes a few minutes while the bioinformatics tools install into `~/.plasmid_demix/`. After that, the app opens instantly.
+
+If you'd rather skip the Terminal step, you can also right-click the **`.dmg`** (not the app) and choose **Open**, copy the app to Applications from there, and on some macOS versions that bypass works. The `xattr -cr` command always works.
+
+## Installing on Linux
+
+1. Download the `PlasmidDemix-linux.tar.gz` from the latest release.
+2. Extract: `tar xzf PlasmidDemix-linux.tar.gz`
+3. Run: `./PlasmidDemix/PlasmidDemix`
+
+## Windows
+
+Not supported as a native `.exe` because `flye` and `medaka` don't ship
+for native Windows. Windows users should run the app inside WSL2 from
+source (`python gui.py`).
+
 ## How it's structured
 
 | File | Purpose |
