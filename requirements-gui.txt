@@ -1,0 +1,6 @@
+customtkinter>=5.2.2
+biopython>=1.83
+pandas>=2.0
+plotly>=5.20
+openpyxl>=3.1
+pyinstaller>=6.6

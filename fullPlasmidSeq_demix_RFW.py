@@ -1,6 +1,8 @@
 import os
+import signal
 import subprocess
 import tempfile
+import threading
 import warnings
 import logging
 import pandas as pd
@@ -109,27 +111,93 @@ def find_sequences(index_file, sequence_sets):
     logging.info(f"Found {len(matched_reads)} matched reads.")
     return matched_reads, unmatched_reads
 
+# --- Cancellation support -----------------------------------------------------
+# The GUI (or any caller) can call request_cancel() to ask an in-flight pipeline
+# to stop. We track every running subprocess so we can kill it — and on POSIX
+# we put each one in its own process group so we can kill its descendants too
+# (flye, medaka, etc. spawn many children).
+class PipelineCancelled(RuntimeError):
+    """Raised when the pipeline is cancelled mid-run."""
+
+
+_cancel_event = threading.Event()
+_active_procs_lock = threading.Lock()
+_active_procs: list[subprocess.Popen] = []
+
+
+def reset_cancel():
+    _cancel_event.clear()
+
+
+def is_cancelled() -> bool:
+    return _cancel_event.is_set()
+
+
+def request_cancel():
+    """Signal the pipeline to stop and kill any currently-running subprocesses."""
+    _cancel_event.set()
+    with _active_procs_lock:
+        procs = list(_active_procs)
+    for p in procs:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            else:
+                p.terminate()
+        except (ProcessLookupError, OSError):
+            pass
+
+
 def run_command(command):
+    if _cancel_event.is_set():
+        raise PipelineCancelled("Pipeline cancelled before command start.")
     logging.info(f"Running command: {command}")
+    popen_kwargs = dict(
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(command, **popen_kwargs)
+    with _active_procs_lock:
+        _active_procs.append(proc)
     try:
-        # Use a timeout to prevent commands from hanging indefinitely
-        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, 
-                               stderr=subprocess.PIPE, text=True, timeout=7200)  # 2-hour timeout
-        if result.stderr:
-            warnings.warn(f"Command '{command}' had the following warnings/errors:\n{result.stderr}")
-        return result
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Command '{command}' failed with error:\n{e.stderr}")
-        raise
-    except subprocess.TimeoutExpired:
-        logging.error(f"Command '{command}' timed out after 7200 seconds")
-        raise
+        try:
+            stdout, stderr = proc.communicate(timeout=7200)
+        except subprocess.TimeoutExpired:
+            logging.error(f"Command '{command}' timed out after 7200 seconds")
+            try:
+                if os.name == "posix":
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                else:
+                    proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            raise
+    finally:
+        with _active_procs_lock:
+            try:
+                _active_procs.remove(proc)
+            except ValueError:
+                pass
+
+    if _cancel_event.is_set():
+        raise PipelineCancelled(f"Pipeline cancelled during: {command}")
+    if proc.returncode != 0:
+        logging.error(f"Command '{command}' failed with code {proc.returncode}:\n{stderr}")
+        raise subprocess.CalledProcessError(proc.returncode, command, output=stdout, stderr=stderr)
+    if stderr:
+        warnings.warn(f"Command '{command}' had the following warnings/errors:\n{stderr}")
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 def align_sequences_quick(input_fasta, reference, output_dir, outputname, log_dir=None):
     if not os.path.exists(reference):
         logging.warning(f"Reference FASTA file {reference} not found. Skipping alignment for {outputname}.")
         return
 
-    makeSam_cmd = f'minimap2 -t {MAX_THREADS} -ax map-ont {reference} {input_fasta} 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o {os.path.join(output_dir, outputname)}_sorted.bam'
+    makeSam_cmd = f'minimap2 -ax map-ont {reference} {input_fasta} 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o {os.path.join(output_dir, outputname)}_sorted.bam'
     index_cmd = f'samtools index {os.path.join(output_dir, outputname)}_sorted.bam'
     samtools_consensus_cmd = f"samtools consensus --config r10.4_sup --output {os.path.join(output_dir, outputname)}_consensus.fa {os.path.join(output_dir, outputname)}_sorted.bam"
     run_command(makeSam_cmd)
@@ -282,67 +350,6 @@ def make_plots(bamfile, output_dir, outputname, log_dir=None):
         if os.path.exists(lengths_file):
             os.remove(lengths_file)
 
-def _demix_fastq(fastq_name, group, fastq_dir, output_dir, ref_dir):
-    """Load one FASTQ file and assign reads to plasmids in a single pass.
-
-    Pre-computes str(record.seq) once per read so substring searches never
-    repeat that conversion. Uses SeqIO.parse (faster than SeqIO.index for
-    bulk loading) and touches each read exactly once regardless of how many
-    plasmids are in the pool.
-
-    Returns (tasks, fastq_name, unmatched_records).
-    """
-    fastq_path = os.path.join(fastq_dir, f"{fastq_name}.fastq")
-    logging.info(f"Loading FASTQ: {fastq_path}")
-
-    # Parse all reads; pre-compute string sequence once per record
-    reads = [(r, str(r.seq)) for r in SeqIO.parse(fastq_path, "fastq")]
-    logging.info(f"Loaded {len(reads)} reads from {fastq_name}")
-
-    # Build ordered list of (plasmid_name, colony_id, required_sequences)
-    plasmid_order = [
-        (row['Plasmid_Name'], row['Colony_ID'],
-         [s.strip() for s in str(row['Unique_Sequences']).split(',') if s.strip()])
-        for _, row in group.iterrows()
-    ]
-
-    # Single pass: assign each read to the first plasmid whose sequences all match.
-    # Using a for/else so we only append to unmatched when no plasmid claimed the read.
-    buckets = {(pname, cid): [] for pname, cid, _ in plasmid_order}
-    unmatched = []
-    for record, record_seq in reads:
-        for pname, cid, seqs in plasmid_order:
-            if all(s in record_seq for s in seqs):
-                buckets[(pname, cid)].append(record)
-                break
-        else:
-            unmatched.append(record)
-
-    # Write per-plasmid FASTA files and build consensus task descriptors
-    tasks = []
-    for pname, cid, _ in plasmid_order:
-        sequences = buckets[(pname, cid)]
-        if sequences:
-            group_output_dir = os.path.join(output_dir, f"{pname}_{cid}")
-            os.makedirs(group_output_dir, exist_ok=True)
-            group_fasta = os.path.join(group_output_dir, f"{pname}_{cid}_reads.fasta")
-            reference_plasmid = os.path.join(ref_dir, f"{pname}.fa") if ref_dir else None
-            write_fasta(sequences, group_fasta)
-            tasks.append({
-                'group_fasta': group_fasta,
-                'reference_plasmid': reference_plasmid,
-                'group_output_dir': group_output_dir,
-                'outputname': f"{pname}_{cid}",
-                'plasmid_name': pname,
-                'colony_id': cid,
-            })
-        else:
-            logging.warning(f"No sequences found for {pname}, Colony {cid}")
-
-    logging.info(f"Demixed {fastq_name}: {len(tasks)} plasmids matched, {len(unmatched)} unused reads")
-    return tasks, fastq_name, unmatched
-
-
 def _run_consensus(task, quick_method, keep_temp, log_dir=None):
     """Run alignment and consensus for a single plasmid task (called in parallel)."""
     group_fasta = task['group_fasta']
@@ -361,8 +368,13 @@ def _run_consensus(task, quick_method, keep_temp, log_dir=None):
             else:
                 logging.info(f"No reference provided; running de novo assembly for {outputname}")
             align_sequences(group_fasta, group_output_dir, outputname, keep_temp=keep_temp, log_dir=log_dir)
+    except PipelineCancelled:
+        logging.info(f"Cancelled: {plasmid_name}, Colony {colony_id}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to process {plasmid_name}, Colony {colony_id}. Error: {e}")
+        if _cancel_event.is_set():
+            logging.info(f"Cancelled: {plasmid_name}, Colony {colony_id}")
+        else:
+            logging.error(f"Failed to process {plasmid_name}, Colony {colony_id}. Error: {e}")
 
 
 def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4, quick_method=False):
@@ -382,6 +394,7 @@ def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4,
     MAX_THREADS = threads
     os.environ["OMP_NUM_THREADS"] = str(MAX_THREADS)
     os.environ["OPENBLAS_NUM_THREADS"] = str(MAX_THREADS)
+    reset_cancel()
 
     log_dir = os.path.join(output_dir, "log")
     os.makedirs(log_dir, exist_ok=True)
@@ -397,32 +410,47 @@ def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4,
     unused_reads_dir = os.path.join(output_dir, "unused_reads")
     os.makedirs(unused_reads_dir, exist_ok=True)
 
-    # --- Phase 1: Demixing (parallel across FASTQ files) ---
-    # Each FASTQ file is independent, so load and demix them concurrently.
-    # Within each file, _demix_fastq does a single pass through all reads,
-    # assigning each read to the first plasmid whose unique sequences match.
+    # --- Phase 1: Demixing ---
+    # Index all FASTQ files once, then search for each plasmid's unique reads
+    # sequentially within each FASTQ group (reads are consumed from the pool as they are claimed).
     logging.info("Phase 1: Demixing — finding unique reads per plasmid.")
 
-    fastq_groups = list(df.groupby('Fastq'))
-    n_fastq_workers = min(len(fastq_groups), max(1, os.cpu_count() or 1))
+    remaining_reads = {}
+    for fastq_name in df['Fastq'].unique():
+        fastq_path = os.path.join(fastq_dir, f"{fastq_name}.fastq")
+        logging.info(f"Indexing FASTQ file: {fastq_path}")
+        remaining_reads[fastq_name] = list(SeqIO.index(fastq_path, "fastq").values())
 
     plasmid_tasks = []
-    remaining_reads = {}
+    for fastq_name, group in df.groupby('Fastq'):
+        logging.info(f"Demixing plasmids from {fastq_name}")
+        current_reads = remaining_reads[fastq_name]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=n_fastq_workers) as executor:
-        futures = {
-            executor.submit(_demix_fastq, fastq_name, group, fastq_dir, output_dir, ref_dir): fastq_name
-            for fastq_name, group in fastq_groups
-        }
-        for future in concurrent.futures.as_completed(futures):
-            fastq_name = futures[future]
-            try:
-                tasks, fname, unused = future.result()
-                plasmid_tasks.extend(tasks)
-                remaining_reads[fname] = unused
-            except Exception as e:
-                logging.error(f"Failed to demix {fastq_name}: {e}")
-                raise
+        for _, row in group.iterrows():
+            plasmid_name = row['Plasmid_Name']
+            unique_sequence = row['Unique_Sequences']
+            colony_id = row['Colony_ID']
+
+            sequences, current_reads = find_sequences(SeqIO.to_dict(current_reads), [unique_sequence])
+
+            if sequences:
+                group_output_dir = os.path.join(output_dir, f"{plasmid_name}_{colony_id}")
+                os.makedirs(group_output_dir, exist_ok=True)
+                group_fasta = os.path.join(group_output_dir, f"{plasmid_name}_{colony_id}_reads.fasta")
+                reference_plasmid = os.path.join(ref_dir, f"{plasmid_name}.fa") if ref_dir else None
+                write_fasta(sequences, group_fasta)
+                plasmid_tasks.append({
+                    'group_fasta': group_fasta,
+                    'reference_plasmid': reference_plasmid,
+                    'group_output_dir': group_output_dir,
+                    'outputname': f"{plasmid_name}_{colony_id}",
+                    'plasmid_name': plasmid_name,
+                    'colony_id': colony_id,
+                })
+            else:
+                logging.warning(f"No sequences found for {plasmid_name}, Colony {colony_id}")
+
+        remaining_reads[fastq_name] = current_reads
 
     # Write unused reads after all demixing is complete
     for fastq_name, unused_reads in remaining_reads.items():
@@ -450,6 +478,11 @@ def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4,
                 logging.error(f"Consensus task for {name} raised an exception: {exc}")
             else:
                 logging.info(f"Consensus complete for {name}")
+            if _cancel_event.is_set():
+                for f in futures:
+                    f.cancel()
+                logging.warning("Pipeline cancelled by user; aborting remaining tasks.")
+                raise PipelineCancelled("Pipeline cancelled by user.")
 
     elapsed = time.time() - start_time
     logging.info(f"Main process completed in {elapsed:.1f}s.")
