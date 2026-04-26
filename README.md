@@ -1,11 +1,11 @@
 ### full plasmid sequencing demix
 This tool allows you to pool many plasmids into one full plasmid sequencing run, separate out individual plasmid sequences from one or more `.fastq` files, and create a consensus for each plasmid in the mixed pool.
 
-## 🖱️ Desktop App (recommended for most users)
+## Desktop App (recommended for most users)
 
 A click-to-run desktop app is available for **macOS and Linux** — no Python or conda setup required for end users. The bioinformatics tools are installed automatically the first time you launch the app.
 
-👉 **[Download the latest release](https://github.com/rachelfweissman/fullplasmid_demix/releases/latest)**
+**[Download the latest release](https://github.com/rachelfweissman/fullplasmid_demix/releases/latest)**
 
 See [GUI_README.md](GUI_README.md) for installation steps, including the one-time `xattr -cr` command needed on macOS to bypass the "damaged" Gatekeeper warning that affects all unsigned apps.
 
