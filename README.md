@@ -1,17 +1,13 @@
-### fullplasmid_demix 
-This tool allows you to pool many plasmids into one full plasmid sequencing run, separate out individual plasmid sequences from one .fastq, and create a consensus for each plasmid in the mixed pool.
-
-This script demixes pooled plasmid sequencing files by searching for unique sequences for each plasmid in the pooled .fastq files, assembles each plasmid, and generates consensus sequences.
+### full plasmid sequencing demix
+This tool allows you to pool many plasmids into one full plasmid sequencing run, separate out individual plasmid sequences from one or more `.fastq` files, and create a consensus for each plasmid in the mixed pool.
 
 ## Requirements
-<ul>
-    <li>minimap2</li>
-    <li>samtools</li>
-    <li>flye</li>
-    <li>racon</li>
-    <li>medaka (optional)</li>
-    <li>circlator (optional)</li>
-</ul>
+- minimap2
+- samtools
+- flye
+- racon
+- medaka *(optional, used in full assembly mode)*
+- circlator *(optional, used in full assembly mode)*
 
 ## Set up Environment
 1. Create new conda environment from demixEnv2.yml file
@@ -22,73 +18,68 @@ This script demixes pooled plasmid sequencing files by searching for unique sequ
         conda activate demixEnv2
 
 ## Set up files
-The script requires an excel file with the following columns: 
-<ul>
-    <li>Plasmid_name - name of single plasmid in pool, MUST match reference fasta file name</li>
-    <li>Unique_Sequences - unique sequences for each plasmid in the pool, separated by commas</li>
-    <li>Colony_ID - unique identifier if sequencing the same plasmid across multiple pools</li>
-    <li>Fastq - name of fastq file of pooled reads in fastq_dir</li>
-</ul>
-    
+The script requires an Excel file with the following columns:
+
+| Column | Description |
+|---|---|
+| `Plasmid_Name` | Name of a single plasmid in the pool. Must match the reference fasta filename (without extension). |
+| `Unique_Sequences` | One or more sequences unique to this plasmid, comma-separated. Reads containing all listed sequences are assigned to this plasmid. |
+| `Colony_ID` | Unique identifier for this sample (e.g. if the same plasmid appears across multiple pools). |
+| `Fastq` | Name of the pooled fastq file (without `.fastq` extension) in `fastq_dir`. |
+
 ## Command-line Parameters
-<ul>
-    <li>-e, --excel_file: path to excel file with plasmid names and unique sequences</li>
-    <li>-r, --ref_dir: (optional) path to directory with reference plasmid fasta files</li>
-    <li>-f, --fastq_dir: path to directory with pooled fastq files</li>
-    <li>-o, --output_dir: path to output directory for results</li>
-    <li>-k, --keep_temp: keep temporary files (intermediate alignments, assemblies)</li>
-    <li>-t, --threads: maximum number of threads to use for external tools (default: 4)</li>
-    <li>-q, --quick_method: Use quick alignment method (minimap2+samtools consensus) instead of full assembly with racon. Default is false</li>
-</ul>
+
+| Flag | Description |
+|---|---|
+| `-e`, `--excel_file` | Path to Excel file with plasmid names and unique sequences *(required)* |
+| `-f`, `--fastq_dir` | Path to directory with pooled fastq files *(required)* |
+| `-o`, `--output_dir` | Path to output directory for results *(required)* |
+| `-r`, `--ref_dir` | Path to directory with reference plasmid fasta files *(optional)* |
+| `-q`, `--quick_method` | Use quick alignment method (minimap2 + samtools consensus) instead of full de novo assembly. Requires a reference directory. |
+| `-t`, `--threads` | Max threads per external tool (default: 4). Parallel jobs are scaled automatically based on available CPUs. |
+| `-k`, `--keep_temp` | Keep intermediate files (alignments, assemblies, Racon/Medaka outputs). |
 
 ## Output
-For each plasmid in the excel file, the script will create a subfolder in the output directory with the following files:
-<ul>
-    <li>{Plasmid_name}_{Colony_ID}_reads.fasta - fasta file with reads containing unique sequences for the plasmid</li>
-    <li>{Plasmid_name}_{Colony_ID}_sorted.bam - sorted bam file of aligned reads to reference plasmid</li>
-    <li>{Plasmid_name}_{Colony_ID}_consensus.fa - consensus sequence of aligned reads</li>
-    <li>{Plasmid_name}_{Colony_ID}_coverage.html - coverage plot of aligned reads</li>
-    <li>{Plasmid_name}_{Colony_ID}_readLengths.html - histogram of read lengths</li>
-</ul>
+Each plasmid gets its own subfolder `{output_dir}/{Plasmid_Name}_{Colony_ID}/` containing:
+
+- `*_reads.fasta` — reads assigned to this plasmid
+- `*_sorted.bam` / `*.bam.bai` — reads aligned to the consensus
+- `*_consensus.fa` — final consensus sequence
+- `*_coverage.html` — interactive coverage plot
+
+A shared `{output_dir}/log/` subfolder contains:
+- `fullPlasmidSeq_demix.log` — full run log
+- `*_readLengths.html` — read length histogram for each plasmid
+
+Unassigned reads are written to `{output_dir}/unused_reads/`.
+
+## How It Works
+
+Processing runs in two phases:
+
+**Phase 1 — Demixing:** Each FASTQ file is loaded and scanned in a single pass. Each read is tested against the plasmids in order and assigned to the first one whose unique sequences all appear in the read. Different FASTQ files are processed in parallel.
+
+**Phase 2 — Consensus:** All per-plasmid alignment and consensus jobs run in parallel, with the number of concurrent jobs scaled to keep total CPU usage bounded (`cpu_count / threads_per_job`).
+
+### Assembly modes
+
+**Quick mode** (`-q`): Maps reads directly to the provided reference using minimap2, then calls consensus with `samtools consensus`. Fast, but requires a reference fasta.
+
+**Full assembly mode** (default): Runs de novo assembly with Flye, polishes with two rounds of Racon, and optionally polishes further with Medaka. Does not require a reference.
 
 ## Usage Examples
 
-### Run with Python Script
-Basic usage:
+Basic usage (full assembly):
 ```
-python fullPlasmidSeq_demix_RFW.py -e example/plasmid_uniqueseq.xlsx -f example/raw_reads -o example/output_directory
-```
-
-With reference directory:
-```
-python fullPlasmidSeq_demix_RFW.py -e example/plasmid_uniqueseq.xlsx -r reference_plasmids -f raw_reads -o output_directory
+python fullPlasmidSeq_demix_RFW.py -e plasmid_uniqueseq.xlsx -f raw_reads -o output_dir
 ```
 
-Keep temporary files:
+Quick mode with reference:
 ```
-python fullPlasmidSeq_demix_RFW.py -e example/plasmid_uniqueseq.xlsx -f raw_reads -o output_directory -k
-```
-
-Specify thread count for external tools:
-```
-python fullPlasmidSeq_demix_RFW.py -e example/plasmid_uniqueseq.xlsx -f raw_reads -o output_directory -t 8
+python fullPlasmidSeq_demix_RFW.py -e plasmid_uniqueseq.xlsx -r reference_plasmids -f raw_reads -o output_dir -q
 ```
 
-## Performance Optimizations
-
-The script includes several optimizations to improve processing speed:
-
-### Resource Management
-- Limits thread usage for each external bioinformatics tool (minimap2, flye, racon, etc.)
-- Controls memory usage by setting environment variables for numerical libraries
-
-### Efficient Processing
-- Groups plasmids by FASTQ file for minimal file loading
-- Uses optimized parameters for Flye assembly (--meta option)
-- Implements early returns in sequence searches
-- Sets timeouts for external commands to prevent indefinite hangs
-
-### I/O Optimization
-- Indexes each FASTQ file only once
-- Processes reads sequentially by group
-- Cleans up intermediate files to save disk space
+Increase threads and keep intermediate files:
+```
+python fullPlasmidSeq_demix_RFW.py -e plasmid_uniqueseq.xlsx -f raw_reads -o output_dir -t 8 -k
+```
