@@ -12,6 +12,7 @@ import argparse
 import shutil
 import time
 import glob
+import concurrent.futures
 
 """
 This script demixes pooled plasmid sequencing files by searching for unique sequences for each plasmid in the pooled .fastq files. 
@@ -37,14 +38,11 @@ Output:
         {Plasmid_name}_{Colony_ID}_readLengths.html - histogram of read lengths
 """
 
-# Configure logging
+# Configure logging (file handler is added in main() once output_dir is known)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("fullPlasmidSeq_demix.log", mode="w")
-    ]
+    handlers=[logging.StreamHandler()]
 )
 
 # Set thread limits for external tools to optimize resource usage
@@ -126,20 +124,20 @@ def run_command(command):
     except subprocess.TimeoutExpired:
         logging.error(f"Command '{command}' timed out after 7200 seconds")
         raise
-def align_sequences_quick(input_fasta, reference, output_dir, outputname):
+def align_sequences_quick(input_fasta, reference, output_dir, outputname, log_dir=None):
     if not os.path.exists(reference):
         logging.warning(f"Reference FASTA file {reference} not found. Skipping alignment for {outputname}.")
         return
-    
-    makeSam_cmd = f'minimap2 -ax map-ont {reference} {input_fasta} 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o {os.path.join(output_dir, outputname)}_sorted.bam'
+
+    makeSam_cmd = f'minimap2 -t {MAX_THREADS} -ax map-ont {reference} {input_fasta} 2>/dev/null| samtools view -b -F 0x900 | samtools sort -o {os.path.join(output_dir, outputname)}_sorted.bam'
     index_cmd = f'samtools index {os.path.join(output_dir, outputname)}_sorted.bam'
     samtools_consensus_cmd = f"samtools consensus --config r10.4_sup --output {os.path.join(output_dir, outputname)}_consensus.fa {os.path.join(output_dir, outputname)}_sorted.bam"
     run_command(makeSam_cmd)
     run_command(index_cmd)
     run_command(samtools_consensus_cmd)
-    make_plots(os.path.join(output_dir, f"{outputname}_sorted.bam"), output_dir, outputname)
+    make_plots(os.path.join(output_dir, f"{outputname}_sorted.bam"), output_dir, outputname, log_dir=log_dir)
 
-def align_sequences(input_fasta, output_dir, outputname, keep_temp=False):
+def align_sequences(input_fasta, output_dir, outputname, keep_temp=False, log_dir=None):
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
@@ -211,7 +209,7 @@ def align_sequences(input_fasta, output_dir, outputname, keep_temp=False):
     run_command(index_cmd)
     
     # Generate plots using the alignment to the final consensus
-    make_plots(os.path.join(output_dir, f"{outputname}_sorted.bam"), output_dir, outputname)
+    make_plots(os.path.join(output_dir, f"{outputname}_sorted.bam"), output_dir, outputname, log_dir=log_dir)
     
     # Clean up intermediate files if not keeping temp files
     if not keep_temp:
@@ -232,12 +230,14 @@ def align_sequences(input_fasta, output_dir, outputname, keep_temp=False):
     
     return consensus_output
 
-def make_plots(bamfile, output_dir, outputname):
+def make_plots(bamfile, output_dir, outputname, log_dir=None):
     logging.info(f"Generating plots for {outputname}.")
+    lengths_dir = log_dir if log_dir else output_dir
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         coverage_file = temp_file.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as tmp_len:
+        lengths_file = tmp_len.name
     try:
-        # Use limited threads for samtools
         coverage_cmd = f'samtools depth -@ {MAX_THREADS} -a {bamfile} > {coverage_file}'
         run_command(coverage_cmd)
         coverage_data = pd.read_csv(coverage_file, sep='\t', header=None, names=['name', 'position', 'coverage'])
@@ -259,11 +259,10 @@ def make_plots(bamfile, output_dir, outputname):
             hovermode='x unified',
         )
         fig.write_html(f"{os.path.join(output_dir, outputname)}_coverage.html")
-        
-        # Use limited threads for samtools
-        lengths_cmd = f"samtools view -@ {MAX_THREADS} {bamfile} | awk '{{print length($10)}}' > read_lengths.txt"
+
+        lengths_cmd = f"samtools view -@ {MAX_THREADS} {bamfile} | awk '{{print length($10)}}' > {lengths_file}"
         run_command(lengths_cmd)
-        read_lengths = pd.read_csv('read_lengths.txt', header=None, names=['length'])
+        read_lengths = pd.read_csv(lengths_file, header=None, names=['length'])
         fig = go.Figure()
         fig.add_trace(go.Histogram(
             x=read_lengths['length'],
@@ -277,9 +276,94 @@ def make_plots(bamfile, output_dir, outputname):
             template='plotly_white',
             showlegend=False,
         )
-        fig.write_html(f"{os.path.join(output_dir, outputname)}_readLengths.html")
+        fig.write_html(f"{os.path.join(lengths_dir, outputname)}_readLengths.html")
     finally:
         os.remove(coverage_file)
+        if os.path.exists(lengths_file):
+            os.remove(lengths_file)
+
+def _demix_fastq(fastq_name, group, fastq_dir, output_dir, ref_dir):
+    """Load one FASTQ file and assign reads to plasmids in a single pass.
+
+    Pre-computes str(record.seq) once per read so substring searches never
+    repeat that conversion. Uses SeqIO.parse (faster than SeqIO.index for
+    bulk loading) and touches each read exactly once regardless of how many
+    plasmids are in the pool.
+
+    Returns (tasks, fastq_name, unmatched_records).
+    """
+    fastq_path = os.path.join(fastq_dir, f"{fastq_name}.fastq")
+    logging.info(f"Loading FASTQ: {fastq_path}")
+
+    # Parse all reads; pre-compute string sequence once per record
+    reads = [(r, str(r.seq)) for r in SeqIO.parse(fastq_path, "fastq")]
+    logging.info(f"Loaded {len(reads)} reads from {fastq_name}")
+
+    # Build ordered list of (plasmid_name, colony_id, required_sequences)
+    plasmid_order = [
+        (row['Plasmid_Name'], row['Colony_ID'],
+         [s.strip() for s in str(row['Unique_Sequences']).split(',') if s.strip()])
+        for _, row in group.iterrows()
+    ]
+
+    # Single pass: assign each read to the first plasmid whose sequences all match.
+    # Using a for/else so we only append to unmatched when no plasmid claimed the read.
+    buckets = {(pname, cid): [] for pname, cid, _ in plasmid_order}
+    unmatched = []
+    for record, record_seq in reads:
+        for pname, cid, seqs in plasmid_order:
+            if all(s in record_seq for s in seqs):
+                buckets[(pname, cid)].append(record)
+                break
+        else:
+            unmatched.append(record)
+
+    # Write per-plasmid FASTA files and build consensus task descriptors
+    tasks = []
+    for pname, cid, _ in plasmid_order:
+        sequences = buckets[(pname, cid)]
+        if sequences:
+            group_output_dir = os.path.join(output_dir, f"{pname}_{cid}")
+            os.makedirs(group_output_dir, exist_ok=True)
+            group_fasta = os.path.join(group_output_dir, f"{pname}_{cid}_reads.fasta")
+            reference_plasmid = os.path.join(ref_dir, f"{pname}.fa") if ref_dir else None
+            write_fasta(sequences, group_fasta)
+            tasks.append({
+                'group_fasta': group_fasta,
+                'reference_plasmid': reference_plasmid,
+                'group_output_dir': group_output_dir,
+                'outputname': f"{pname}_{cid}",
+                'plasmid_name': pname,
+                'colony_id': cid,
+            })
+        else:
+            logging.warning(f"No sequences found for {pname}, Colony {cid}")
+
+    logging.info(f"Demixed {fastq_name}: {len(tasks)} plasmids matched, {len(unmatched)} unused reads")
+    return tasks, fastq_name, unmatched
+
+
+def _run_consensus(task, quick_method, keep_temp, log_dir=None):
+    """Run alignment and consensus for a single plasmid task (called in parallel)."""
+    group_fasta = task['group_fasta']
+    reference_plasmid = task['reference_plasmid']
+    group_output_dir = task['group_output_dir']
+    outputname = task['outputname']
+    plasmid_name = task['plasmid_name']
+    colony_id = task['colony_id']
+    try:
+        if reference_plasmid and quick_method:
+            logging.info(f"Quick mapping to reference for {outputname}")
+            align_sequences_quick(group_fasta, reference_plasmid, group_output_dir, outputname, log_dir=log_dir)
+        else:
+            if reference_plasmid:
+                logging.info(f"Reference available but quick_method not set; running de novo assembly for {outputname}")
+            else:
+                logging.info(f"No reference provided; running de novo assembly for {outputname}")
+            align_sequences(group_fasta, group_output_dir, outputname, keep_temp=keep_temp, log_dir=log_dir)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to process {plasmid_name}, Colony {colony_id}. Error: {e}")
+
 
 def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4, quick_method=False):
     """
@@ -294,77 +378,81 @@ def main(excel_file, ref_dir, fastq_dir, output_dir, keep_temp=False, threads=4,
       - threads: int, max threads for external tools
       - quick_method: bool, use quick alignment/consensus pipeline instead of full assembly
     """
-    import logging
+    global MAX_THREADS
+    MAX_THREADS = threads
+    os.environ["OMP_NUM_THREADS"] = str(MAX_THREADS)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(MAX_THREADS)
+
+    log_dir = os.path.join(output_dir, "log")
+    os.makedirs(log_dir, exist_ok=True)
+    log_handler = logging.FileHandler(os.path.join(log_dir, "fullPlasmidSeq_demix.log"), mode="w")
+    log_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logging.getLogger().addHandler(log_handler)
+
     logging.info(f"Options: keep_temp={keep_temp}, threads={threads}, quick_method={quick_method}")
-    # Start execution timer
     start_time = time.time()
-    
     logging.info("Starting main process.")
+
     df = read_sequence_sets_from_excel(excel_file)
     unused_reads_dir = os.path.join(output_dir, "unused_reads")
     os.makedirs(unused_reads_dir, exist_ok=True)
-    processed_fastq = {}
-    
-    # Index all FASTQ files first to avoid reindexing
-    # This is a performance optimization: we index each FASTQ file once, not for each plasmid
-    for fastq_name in df['Fastq'].unique():
-        fastq_path = os.path.join(fastq_dir, f"{fastq_name}.fastq")
-        logging.info(f"Indexing FASTQ file: {fastq_path}")
-        index_file = SeqIO.index(fastq_path, "fastq")
-        processed_fastq[fastq_name] = list(index_file.values())
-    
-    # Process sequentially
-    # Group plasmids by FASTQ file for more efficient processing
-    fastq_groups = df.groupby('Fastq')
-    
-    for fastq_name, group in fastq_groups:
-        logging.info(f"Processing plasmids from {fastq_name}")
-        
-        # Get the relevant reads once per fastq file
-        fastq_reads = processed_fastq[fastq_name]
-        
-        # Process each plasmid in this FASTQ file
-        for _, row in group.iterrows():
-            plasmid_name = row['Plasmid_Name']
-            unique_sequence = row['Unique_Sequences']
-            colony_id = row['Colony_ID']
-            
-            
-            # Find sequences for this plasmid
-            sequences, fastq_reads = find_sequences(SeqIO.to_dict(fastq_reads), [unique_sequence])
-            
-            if sequences:
-                group_output_dir = os.path.join(output_dir, f"{plasmid_name}_{colony_id}")
-                os.makedirs(group_output_dir, exist_ok=True)
-                group_fasta = os.path.join(group_output_dir, f"{plasmid_name}_{colony_id}_reads.fasta")
-                reference_plasmid = os.path.join(ref_dir, f"{plasmid_name}.fa") if ref_dir else None
-                write_fasta(sequences, group_fasta)
 
-                try:
-                    # Choose workflow:
-                    # - Use quick mapping to reference ONLY when quick_method is True and a reference exists.
-                    # - Otherwise run the full de novo assembly workflow (align_sequences).
-                    if reference_plasmid and quick_method:
-                        logging.info(f"Quick mapping to reference for {plasmid_name}_{colony_id}")
-                        align_sequences_quick(group_fasta, reference_plasmid, group_output_dir, f"{plasmid_name}_{colony_id}")
-                    else:
-                        # Run de novo assembly/polishing even if a reference is available when quick_method is False
-                        if reference_plasmid:
-                            logging.info(f"Reference available but quick_method not set; running de novo assembly for {plasmid_name}_{colony_id}")
-                        else:
-                            logging.info(f"No reference provided; running de novo assembly for {plasmid_name}_{colony_id}")
-                        align_sequences(group_fasta, group_output_dir, f"{plasmid_name}_{colony_id}", keep_temp=keep_temp)
-                except subprocess.CalledProcessError as e:
-                    logging.error(f"Failed to process {plasmid_name}, Colony {colony_id}. Error: {e}")
-            else:
-                logging.warning(f"No sequences found for {plasmid_name}, Colony {colony_id}")
+    # --- Phase 1: Demixing (parallel across FASTQ files) ---
+    # Each FASTQ file is independent, so load and demix them concurrently.
+    # Within each file, _demix_fastq does a single pass through all reads,
+    # assigning each read to the first plasmid whose unique sequences match.
+    logging.info("Phase 1: Demixing — finding unique reads per plasmid.")
 
-    # write unused reads if any
-    for fastq_name, unused_reads in processed_fastq.items():
+    fastq_groups = list(df.groupby('Fastq'))
+    n_fastq_workers = min(len(fastq_groups), max(1, os.cpu_count() or 1))
+
+    plasmid_tasks = []
+    remaining_reads = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_fastq_workers) as executor:
+        futures = {
+            executor.submit(_demix_fastq, fastq_name, group, fastq_dir, output_dir, ref_dir): fastq_name
+            for fastq_name, group in fastq_groups
+        }
+        for future in concurrent.futures.as_completed(futures):
+            fastq_name = futures[future]
+            try:
+                tasks, fname, unused = future.result()
+                plasmid_tasks.extend(tasks)
+                remaining_reads[fname] = unused
+            except Exception as e:
+                logging.error(f"Failed to demix {fastq_name}: {e}")
+                raise
+
+    # Write unused reads after all demixing is complete
+    for fastq_name, unused_reads in remaining_reads.items():
         if unused_reads:
             unused_reads_fastq = os.path.join(unused_reads_dir, f"{fastq_name}_unused.fastq")
             write_fastq(unused_reads, unused_reads_fastq)
-    logging.info("Main process completed.")
+
+    logging.info(f"Phase 1 complete. {len(plasmid_tasks)} plasmids to process.")
+
+    # --- Phase 2: Consensus in parallel ---
+    # Each plasmid's alignment/consensus is independent; run them concurrently.
+    # Parallel workers = CPUs / per-tool threads, so total thread usage stays bounded.
+    n_workers = max(1, (os.cpu_count() or 1) // MAX_THREADS)
+    logging.info(f"Phase 2: Running consensus for {len(plasmid_tasks)} plasmids ({n_workers} parallel workers).")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = {
+            executor.submit(_run_consensus, task, quick_method, keep_temp, log_dir): task['outputname']
+            for task in plasmid_tasks
+        }
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            exc = future.exception()
+            if exc:
+                logging.error(f"Consensus task for {name} raised an exception: {exc}")
+            else:
+                logging.info(f"Consensus complete for {name}")
+
+    elapsed = time.time() - start_time
+    logging.info(f"Main process completed in {elapsed:.1f}s.")
 
 if __name__ == "__main__":
     import argparse
