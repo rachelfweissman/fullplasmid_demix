@@ -94,22 +94,35 @@ def _download_micromamba(log: Callable[[str], None] | None) -> Path:
     return MICROMAMBA_BIN
 
 
-def _create_env(micromamba: Path, env_yml: Path, log: Callable[[str], None] | None) -> None:
-    if (ENV_DIR / "bin").exists():
-        return
-    _log(log, f"[setup] Creating bioinformatics env at {ENV_DIR} (this may take several minutes)…")
-    cmd = [
-        str(micromamba), "create", "-y",
-        "-p", str(ENV_DIR),
-        "-f", str(env_yml),
-    ]
+def _create_or_update_env(
+    micromamba: Path,
+    env_yml: Path,
+    log: Callable[[str], None] | None,
+) -> None:
+    """Create the managed environment, or reconcile an existing one with its YAML."""
+    env_exists = (ENV_DIR / "conda-meta" / "history").exists()
+    action = "Updating" if env_exists else "Creating"
+    _log(log, f"[setup] {action} bioinformatics env at {ENV_DIR} (this may take several minutes)…")
+
+    if env_exists:
+        cmd = [
+            str(micromamba), "env", "update", "-y",
+            "-p", str(ENV_DIR),
+            "-f", str(env_yml),
+        ]
+    else:
+        cmd = [
+            str(micromamba), "create", "-y",
+            "-p", str(ENV_DIR),
+            "-f", str(env_yml),
+        ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert proc.stdout is not None
     for line in proc.stdout:
         _log(log, "[setup] " + line.rstrip())
     proc.wait()
     if proc.returncode != 0:
-        raise ToolsMissingError(f"Environment creation failed (exit {proc.returncode})")
+        raise ToolsMissingError(f"Environment {action.lower()} failed (exit {proc.returncode})")
 
 
 def ensure_tools_available(log: Callable[[str], None] | None = None) -> None:
@@ -135,7 +148,7 @@ def ensure_tools_available(log: Callable[[str], None] | None = None) -> None:
         )
 
     micromamba = _download_micromamba(log)
-    _create_env(micromamba, env_yml, log)
+    _create_or_update_env(micromamba, env_yml, log)
     _prepend_path(env_bin)
 
     still_missing = _missing_tools(env_bin)
